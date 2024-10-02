@@ -1,0 +1,100 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.2.3'
+	id 'io.spring.dependency-management' version '1.1.4'
+	id "org.sonarqube" version "3.0"
+	id 'jacoco'
+}
+
+group = 'com.lg.microservice.product'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	sourceCompatibility = '17'
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+	maven {
+		url = "https://nexus.-shared.example.com/repository/maven-example-snapshots/"
+	}
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.cloud:spring-cloud-starter-openfeign:4.1.1'
+	
+	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.3.0'
+	
+	// Lombok
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+tasks.named('test') {
+	useJUnitPlatform()
+	finalizedBy 'jacocoTestReport'
+}
+
+tasks.named('sonarqube').configure {
+	dependsOn test
+}
+
+// following folders will not calculate in coverage report
+def jacocoCoverageExclusion = [
+		'**/dao/**',
+		'**/model/**',
+		'**/flyway/**',
+		'**/constant/**',
+		'**/health/**',
+		'**/header/**',
+		'**/utils/**',
+		'**/common/**',
+		'**/*Application.class',
+		'**/test/java/**'
+]
+jacoco {
+    toolVersion = '0.8.7'
+}
+jacocoTestReport {
+	reports {
+		html.required = true // this is for our developer to local verify.
+		csv.required = false // current is disable, no program use it.
+		xml.required = true // this is for sonarqube required.
+	}
+
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: jacocoCoverageExclusion)
+		}))
+	}
+
+	finalizedBy 'jacocoTestCoverageVerification'
+}
+
+jacocoTestCoverageVerification {
+	violationRules {
+		rule {
+			element = 'CLASS'
+		}
+	}
+}
+
+sonarqube {
+	properties {
+		property 'sonar.sourceEncoding', 'UTF-8'
+		property 'sonar.exclusions', jacocoCoverageExclusion
+		property 'sonar.coverage.exclusions', jacocoCoverageExclusion
+		property 'sonar.projectKey', "java-simple-app"
+		property 'sonar.projectName', "java-simple-app"
+		property 'sonar.login', ""
+		property 'sonar.host.url', "http://sonarqube.example-shared.example.com"
+	}
+}

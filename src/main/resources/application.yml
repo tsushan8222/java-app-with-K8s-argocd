@@ -1,0 +1,120 @@
+spring:
+  profiles:
+    group:
+      "DEV": "DEV_CFG"
+      "QA": "QA_CFG"
+      "STG": "STG_CFG"
+      "PRD": "PRD_CFG"
+    active:
+
+product:
+  process:
+    builder:
+      url: http://localhost:8086/product/process/01/v1
+    cac:
+      url: http://localhost:8081/business/product/process/v1
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 60000
+        loggerLevel: full
+server:
+  port: 8080
+  servlet:
+    context-path: /business/product
+    
+---
+spring:
+  config:
+    activate:
+      on-profile:
+        - "DEV_CFG"
+product:
+  process:
+    builder:
+      url: http://microservice.example.com/product/process/v1
+    cac:
+      url: http://microservice.dev.example.com/business/product/process/v1
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 60000
+        loggerLevel: full
+server:
+  port: 8080
+  servlet:
+    context-path: /business/product
+---
+spring:
+  config:
+    activate:
+      on-profile:
+        - "QA_CFG"
+product:
+  process:
+    builder:
+      url: http://microservice.qa.example.com/product/process/v1
+    cac:
+      url: http://microservice.qa.example.com/business/product/process/v1
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 60000
+        loggerLevel: headers
+server:
+  port: 8080
+  servlet:
+    context-path: /business/product
+---
+spring:
+  config:
+    activate:
+      on-profile:
+        - "STG_CFG"
+product:
+  process:
+    builder:
+      url: http://microservice. -stg.example.com/product/process/v1
+    cac:
+      url: http://microservice. -stg.example.com/business/product/process/v1
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 60000
+        loggerLevel: headers
+server:
+  port: 8080
+  servlet:
+    context-path: /business/product
+---
+spring:
+  config:
+    activate:
+      on-profile:
+        - "PRD_CFG"
+product:
+  process:
+    builder:
+      url: http://microservice. -prd.example.com/product/process/v1
+    cac:
+      url: http://microservice. -prd.example.com/business/product/process/v1
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 5000
+        readTimeout: 60000
+        loggerLevel: headers
+server:
+  port: 8080
+  servlet:
+    context-path: /business/product
+---

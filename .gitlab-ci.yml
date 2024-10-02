@@ -1,0 +1,283 @@
+# Auto Completion Service
+# Variables 
+variables:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  IMAGESCANFAILMESSAGE: Image Scan Stage Filed, Please check Vulnerabilities
+
+  
+.deploy-script-checks-before: &deploy-script-checks-before
+  - ARGO_ROLLOUT_LIST_BEFORE=$(./kubectl-argo-rollouts-linux-amd64 list rollouts -n ${APP_NAMESPACE} 2>/dev/null|{ grep microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} || true; }|wc -l) 
+  - >
+    if [ "${ARGO_ROLLOUT_LIST_BEFORE}" -eq 1 ]; then \
+      ./kubectl-argo-rollouts-linux-amd64 get rollout microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} -n ${APP_NAMESPACE} ;
+    fi ;
+
+.deploy-script-checks: &deploy-script-checks
+  - ARGO_ROLLOUT_LIST=$(./kubectl-argo-rollouts-linux-amd64 list rollouts -n ${APP_NAMESPACE} 2>/dev/null|{ grep microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} || true; }|wc -l) 
+  - echo "${ARGO_ROLLOUT_LIST}"
+  - >
+    if [ "${ARGO_ROLLOUT_LIST}" -eq 1 ]; then \
+      ARGO_ROLLOUT_COUNTER=0 ;
+      while [  "${ARGO_ROLLOUT_COUNTER}" -lt 10 ]; do \
+        ARGO_ROLLOUT_STATUS=$(./kubectl-argo-rollouts-linux-amd64 get rollout microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} -n ${APP_NAMESPACE}|grep Status|{ grep Healthy || true; }|wc -l) ;
+        if [ "${ARGO_ROLLOUT_STATUS}" -eq 0 ]; then \
+          ./kubectl-argo-rollouts-linux-amd64 get rollout microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} -n ${APP_NAMESPACE} ;
+          ARGO_ROLLOUT_COUNTER=$((ARGO_ROLLOUT_COUNTER+1)) ;
+          sleep 30 ;
+        else \
+          ./kubectl-argo-rollouts-linux-amd64 get rollout microservices-ds-${APP_NAME}-${CI_ENVIRONMENT_NAME} -n ${APP_NAMESPACE} ;
+          ARGO_ROLLOUT_COUNTER=100 ;
+        fi ;
+      done ;
+    fi ;
+
+# Stages list
+stages:
+  - slack
+  - lower-develop-env-merge
+  - lower-qa-env-merge
+#  - unit-testing
+  - sonar-scanner
+  - build
+  - dev-image
+  - dev-deploy
+  - dev-swagger-upload
+  - qa-image
+  - qa-deploy
+  - qa-swagger-upload
+  - check_commit
+  - stg-deploy
+  - prd-deploy
+  - openMr
+
+include:
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                    
+    file: 'shared/microservice/module/common/common-steps.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                    
+    file: 'shared/microservice/module/common/single-env-common.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                    
+    file: 'shared/microservice/module/common/multi-env-common.yaml'
+  
+  # - project: 'infrastructure/common-pipeline-configuration'
+  #   ref: main                                     
+  #   file: 'shared/microservice/module/unit-testing/unit-testing.yaml'
+  
+  #- project: 'infrastructure/common-pipeline-configuration'
+  #  ref: main                                     
+  #  file: 'shared/microservice/module/sonar/sonar-scanner.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/gradle-build/gradle-build.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/docker/docker-image.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/deployment/deployment.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/deployment/lower-multi-env-deployment.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/swagger/swagger.yaml'
+  
+  - project: 'infrastructure/common-pipeline-configuration'
+    ref: main                                     
+    file: 'shared/microservice/module/merge_automation/merge_automation.yaml'
+
+# unit-test:
+#   stage: unit-testing
+#   image: 076614340621.dkr.ecr.us-east-1.amazonaws.com/examplecomus-base-gradle-jdk-shared:gradle-jdk-17
+#   extends: 
+#     #- .shared-gradle-jdk-image
+#     - .multi-env-unit-sonar-branches
+#     - .common-unit-testing-artifacts
+#   before_script:
+#     - export GRADLE_USER_HOME=`pwd`/.gradle
+#   script:
+#     - !reference [.common-unit-testing-steps-without-exit-code, script]
+
+sonarqube-check:
+  stage: sonar-scanner
+  image: 076614340621.dkr.ecr.us-east-1.amazonaws.com/examplecomus-base-gradle-jdk-shared:gradle-jdk-17
+  rules:
+    - if: ($CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^develop-.*$/ || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^release-.*$/ || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "release")
+    - if: ($CI_COMMIT_BRANCH =~ /^develop-.*$/ || $CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH =~ "/^hotfix\/[A-Za-z]+-\d+$/")
+
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    #- sed -i "s,MAX_HTTP_HEADER_SIZE,${MAX_HTTP_HEADER_SIZE},g" src/main/resources/application.yml
+    - chmod +x ./gradlew
+    - ./gradlew --version
+    - ./gradlew sonarqube --stacktrace -Dsonar.projectName=${SONAR_PROJECT_NAME} -Dsonar.projectKey=${SONAR_PROJECT_NAME} -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.login=${SONAR_TOKEN} -Dsonar.qualitygate.wait=true
+
+
+Gradle-build:
+  stage: build
+  image: 076614340621.dkr.ecr.us-east-1.amazonaws.com/examplecomus-base-gradle-jdk-shared:gradle-jdk-17
+  extends: 
+    #- .shared-gradle-jdk-image
+    - .all-branches-single-env
+    - .common-gradle-build-artifacts
+  before_script:
+    - export GRADLE_USER_HOME=`pwd`/.gradle
+    - gradle --version
+  script:
+    - gradle build
+
+###############################################################################################
+########################################### DEV ENV ###########################################
+###############################################################################################
+
+dev_docker_image:
+  stage: dev-image
+  extends: 
+    - .dev-env-name
+    - .webdev-branch
+  before_script:
+    - !reference [.image-script-before, before_script]
+  script:
+    - !reference [.lower-env-newrelic-configuration, script]
+    - !reference [.image-build-script, script]
+    - !reference [.image-scan-report, script]
+
+dev_deploy_eks:
+  stage: dev-deploy
+  extends: 
+    - .dev-env-name
+    - .webdev-branch
+    - .eks-deployment-image
+  needs: [dev_docker_image]
+  before_script:
+    - export AWS_PROFILE=examplecomus-${CI_ENVIRONMENT_NAME}
+    - export ENV=DEV
+    - !reference [.deploy-script-before, before_script]
+  script:
+
+    - !reference [.common-deployment-lower-single-env-steps, script]
+    - !reference [.common-deployment-apply-lower-single-env-steps, script]
+
+dev_Swagger_Upload:
+  stage: dev-swagger-upload
+  extends: 
+    - .dev-env-name
+    - .webdev-branch
+  needs: [dev_deploy_eks]
+  before_script:
+    - !reference [.image-script-before, before_script]
+  script:
+    - wget https://microservice.-dev.example.com/business/product/system/v3/api-docs
+    - !reference [.swagger-upload-single-env-script, script]
+###############################################################################################
+########################################### QA ENV ############################################
+###############################################################################################
+
+
+qa_docker_image:
+  stage: qa-image
+  extends: 
+    - .qa-env-name
+    - .webqa-docker-image-branch
+  before_script:
+    - !reference [.image-script-before, before_script]
+  script:
+    - !reference [.lower-env-newrelic-configuration, script]
+    - !reference [.image-build-script, script]
+    - !reference [.image-scan-report, script]
+
+qa_deploy_eks:
+  stage: qa-deploy
+  extends: 
+    - .qa-env-name
+    - .webqa-deployment-branch
+    - .eks-deployment-image
+  needs: [qa_docker_image]
+  before_script:
+    - export AWS_PROFILE=examplecomus-${CI_ENVIRONMENT_NAME}
+    - export ENV=QA
+    - !reference [.deploy-script-before, before_script]
+  script:
+
+    - !reference [.common-deployment-lower-single-env-steps, script]
+    - !reference [.common-deployment-apply-lower-single-env-steps, script]
+
+qa_Swagger_Upload:
+  stage: qa-swagger-upload
+  extends: 
+    - .qa-env-name
+    - .webqa-deployment-branch
+  needs: [qa_deploy_eks]
+  before_script:
+    - !reference [.image-script-before, before_script]
+  script:
+    - wget https://microservice.examplecomus-qa.example.com/business/product/system/v3/api-docs
+    - !reference [.swagger-upload-single-env-script, script]
+###############################################################################################
+########################################### STG ENV ############################################
+###############################################################################################
+
+stg_deploy_eks:
+  stage: stg-deploy
+  extends: 
+    - .stg-env-name
+    - .single-env-stg-deployment-branch
+    - .eks-deployment-image
+  when: manual
+  needs: [Main_Branch_Commit]
+  before_script:
+    - !reference [.admin-auth-check-before, before_script]
+    - export AWS_PROFILE=examplecomus-${CI_ENVIRONMENT_NAME}
+    - export ENV=STG
+    - !reference [.deploy-script-before, before_script]
+  script:
+    - *deploy-script-checks-before
+
+    - !reference [.nr-license-key-stg, script]
+    - !reference [.common-deployment-stg-prd-env-steps, script]
+    - !reference [.common-deployment-apply-stg-prd-env-steps, script]
+    - *deploy-script-checks
+
+###############################################################################################
+########################################### PRD ENV ############################################
+###############################################################################################
+
+
+prd_deploy_eks:
+  stage: prd-deploy
+  extends: 
+    - .prd-env-name
+    - .single-env-prd-deployment-branch
+    - .eks-deployment-image
+  when: manual
+  needs: [Main_Branch_Commit]
+  before_script:
+    - !reference [.admin-auth-check-before, before_script]
+    - export AWS_PROFILE=examplecomus-${CI_ENVIRONMENT_NAME}
+    - export ENV=PRD
+    - !reference [.deploy-script-before, before_script]
+    - !reference [.muting-alert-script-before, before_script]
+  script:
+    - *deploy-script-checks-before
+    - !reference [.nr-license-key-prd, script]
+    - !reference [.common-deployment-stg-prd-env-steps, script]
+    - !reference [.common-deployment-apply-stg-prd-env-steps, script]
+    - *deploy-script-checks
+  after_script:
+    - !reference [.slack-prd-after-script, after_script]
+    - !reference [.muting-alert-script-after, after_script]
